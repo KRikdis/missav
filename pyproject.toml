@@ -1,0 +1,97 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "missav-scraper"
+version = "2.0.0"
+description = "一个用于爬取 MissAV 网站视频并生成 M3U 播放列表的完整项目"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+authors = [
+    {name = "MissAV Team"}
+]
+keywords = ["missav", "scraper", "m3u", "video"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+
+dependencies = [
+    "missav-api>=0.1.0",
+    "requests>=2.25.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=6.0",
+    "black>=21.0",
+    "flake8>=3.9",
+    "pylint>=2.8",
+]
+
+[project.urls]
+Homepage = "https://github.com/KRikdis/missav"
+Repository = "https://github.com/KRikdis/missav.git"
+Issues = "https://github.com/KRikdis/missav/issues"
+
+[tool.black]
+line-length = 88
+target-version = ['py38', 'py39', 'py310', 'py311']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | build
+  | dist
+)/
+'''
+
+[tool.isort]
+profile = "black"
+multi_line_mode = 3
+include_trailing_comma = true
+force_grid_wrap = 0
+use_parentheses = true
+ensure_newline_before_comments = true
+line_length = 88
+
+[tool.pylint]
+max-line-length = 88
+disable = [
+    "C0114",  # missing-module-docstring
+    "C0115",  # missing-class-docstring
+    "C0116",  # missing-function-docstring
+    "R0913",  # too-many-arguments
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+addopts = "-v --tb=short"
+
+[tool.coverage.run]
+source = ["src"]
+omit = ["*/tests/*", "*/__main__.py"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]

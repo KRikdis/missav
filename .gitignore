@@ -1,38 +1,18 @@
-# Python 缓存文件
+# 依赖和虚拟环境
+venv/
+env/
+ENV/
+.venv
+*.egg-info/
+dist/
+build/
+
+# Python 缓存
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
-
-# C 扩展
-*.c
-*.egg-info/
-
-# Pip
 .Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-pip-wheel-metadata/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-
-# 虚拟环境
-venv/
-ENV/
-env/
-.venv
 
 # IDE
 .vscode/
@@ -42,12 +22,37 @@ env/
 *~
 .DS_Store
 
-# 爬虫生成的文件
-*.m3u
-missed_videos.json
+# 测试和覆盖
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# 输出文件（生成的 M3U）
+output/*.m3u
+!output/.gitkeep
+
+# 状态文件
+scraper_state.json
+*.bak
+*.tmp
+
+# 日志
+*.log
 logs/
 
-# 配置文件（但保留示例）
+# 环境变量
+.env
+.env.local
+
+# OS 特定
+.DS_Store
+Thumbs.db
+
+# 临时文件
+*.tmp
+*.temp
+temp/
 config.json
 !config.example.json
 
