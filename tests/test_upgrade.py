@@ -5,32 +5,31 @@
 """
 
 import json
+import pytest
 from pathlib import Path
 
 
-def test_video_structure():
+def test_video_structure(sample_video):
     """测试视频数据结构"""
     print("=" * 60)
     print("测试视频数据结构")
     print("=" * 60)
     
-    # 模拟新的数据结构
-    test_video = {
-        'code': 'ABC-001',
-        'url': 'https://example.com/stream.m3u8',
-        'genres': ['日本', '高清', '新作'],
-        'thumbnail': 'https://example.com/thumb.jpg'
-    }
+    print(f"✓ 视频番号: {sample_video['code']}")
+    print(f"✓ M3U8 URL: {sample_video['url']}")
+    print(f"✓ 分类列表: {sample_video['genres']}")
+    print(f"✓ 缩略图: {sample_video['thumbnail']}")
     
-    print(f"✓ 视频番号: {test_video['code']}")
-    print(f"✓ M3U8 URL: {test_video['url']}")
-    print(f"✓ 分类列表: {test_video['genres']}")
-    print(f"✓ 缩略图: {test_video['thumbnail']}")
-    
-    return test_video
+    # 确保视频对象包含所需字段
+    assert 'code' in sample_video
+    assert 'url' in sample_video
+    assert 'genres' in sample_video
+    assert 'thumbnail' in sample_video
+    assert isinstance(sample_video['genres'], list)
+    assert len(sample_video['genres']) > 0
 
 
-def test_m3u_generation(video):
+def test_m3u_generation(sample_video):
     """测试 M3U 条目生成"""
     print("\n" + "=" * 60)
     print("测试 M3U 条目生成")
@@ -39,10 +38,10 @@ def test_m3u_generation(video):
     test_output = []
     test_output.append('#EXTM3U')
     
-    code = video.get('code', 'Unknown')
-    url = video.get('url', '')
-    genres = video.get('genres', [])
-    thumbnail = video.get('thumbnail', '')
+    code = sample_video.get('code', 'Unknown')
+    url = sample_video.get('url', '')
+    genres = sample_video.get('genres', [])
+    thumbnail = sample_video.get('thumbnail', '')
     
     if not genres or len(genres) == 0:
         genres = ['未分类']
@@ -59,38 +58,21 @@ def test_m3u_generation(video):
         print(f"  {line2}")
     
     print(f"\n✓ 生成了 {len(genres)} 条 M3U 条目")
-    return test_output
+    
+    # 验证生成的条目
+    assert len(test_output) >= 3  # 至少有#EXTM3U + 1个条目（2行）
+    assert test_output[0] == '#EXTM3U'
+    assert len(genres) > 0
 
 
-def test_multiple_videos():
+def test_multiple_videos(multiple_videos):
     """测试多个视频"""
     print("\n" + "=" * 60)
     print("测试多个视频场景")
     print("=" * 60)
     
-    videos = [
-        {
-            'code': 'ABC-001',
-            'url': 'https://example.com/stream1.m3u8',
-            'genres': ['日本', '高清'],
-            'thumbnail': 'https://example.com/thumb1.jpg'
-        },
-        {
-            'code': 'DEF-002',
-            'url': 'https://example.com/stream2.m3u8',
-            'genres': ['中文', '欧美'],
-            'thumbnail': 'https://example.com/thumb2.jpg'
-        },
-        {
-            'code': 'GHI-003',
-            'url': 'https://example.com/stream3.m3u8',
-            'genres': [],  # 无分类
-            'thumbnail': 'https://example.com/thumb3.jpg'
-        }
-    ]
-    
     total_entries = 0
-    for video in videos:
+    for video in multiple_videos:
         genres = video.get('genres', [])
         if not genres or len(genres) == 0:
             genres = ['未分类']
@@ -101,40 +83,41 @@ def test_multiple_videos():
         genre_str = ', '.join(genres)
         print(f"✓ {code}: {genre_str} ({entry_count} 条条目)")
     
-    print(f"\n总结: {len(videos)} 个视频 → {total_entries} 个 M3U 条目")
-    return videos, total_entries
+    print(f"\n总结: {len(multiple_videos)} 个视频 → {total_entries} 个 M3U 条目")
+    
+    # 验证结果
+    assert len(multiple_videos) == 3
+    assert total_entries >= 3  # 至少有3个条目
 
 
-def test_state_file():
+def test_state_file(temp_state_file):
     """测试状态文件格式"""
     print("\n" + "=" * 60)
     print("测试状态文件格式")
     print("=" * 60)
     
-    state = {
-        'videos': [
-            {
-                'code': 'ABC-001',
-                'url': 'https://example.com/stream.m3u8',
-                'genres': ['日本', '高清'],
-                'thumbnail': 'https://example.com/thumb.jpg'
-            }
-        ],
-        'last_update': '2026-03-21T10:00:00'
-    }
+    # 验证临时状态文件存在且可读
+    assert temp_state_file.exists()
     
-    # 模拟状态文件保存
-    state_file = Path('test_state.json')
-    try:
-        # 不实际保存到磁盘，只验证格式
-        state_json = json.dumps(state, ensure_ascii=False, indent=2)
-        print("✓ 状态文件格式验证成功")
-        print("格式示例:")
-        print(state_json[:200] + "...")
-        return True
-    except Exception as e:
-        print(f"✗ 状态文件格式验证失败: {e}")
-        return False
+    # 读取和验证格式
+    with open(temp_state_file, 'r', encoding='utf-8') as f:
+        state = json.load(f)
+    
+    print("✓ 状态文件格式验证成功")
+    
+    # 验证状态文件结构
+    assert 'videos' in state
+    assert 'last_update' in state
+    assert isinstance(state['videos'], list)
+    if len(state['videos']) > 0:
+        video = state['videos'][0]
+        assert 'code' in video
+        assert 'url' in video
+        assert 'genres' in video
+        assert 'thumbnail' in video
+    
+    print("格式示例:")
+    print(json.dumps(state, ensure_ascii=False, indent=2)[:200] + "...")
 
 
 def main():

@@ -177,6 +177,80 @@ class MissAVScraper:
         except Exception as e:
             logger.error(f"保存状态失败: {e}")
     
+    def _process_video_object(self, video_obj, source_query: str) -> int:
+        """
+        处理单个视频对象，创建M3U条目
+        
+        此方法提取了video-codes和搜索模式中重复的视频处理逻辑
+        
+        Args:
+            video_obj: 视频对象（包含video_code、m3u8_base_url、genres等字段）
+            source_query: 视频来源（查询词或演员名）
+        
+        Returns:
+            本次处理新增的M3U条目数量
+        """
+        try:
+            # 提取基本信息
+            video_code = video_obj.video_code
+            m3u8_url = video_obj.m3u8_base_url or ""
+            
+            if not m3u8_url:
+                logger.warning(f"  跳过: 无法获取 m3u8 URL")
+                return 0
+            
+            logger.info(f"  ✓ 视频代码: {video_code}")
+            logger.info(f"  ✓ m3u8 URL: {m3u8_url[:50]}...")
+            
+            # 提取 genres 和 thumbnail
+            genres_raw = getattr(video_obj, 'genres', [])
+            if not isinstance(genres_raw, list):
+                genres_raw = [genres_raw] if genres_raw else []
+            thumbnail = getattr(video_obj, 'thumbnail', "") or ""
+            
+            # 规范化 genres（去除空、去重）
+            genres = utils.normalize_genres(genres_raw)
+            unique_genres = set(genres)
+            logger.info(f"  ✓ 找到 {len(unique_genres)} 个分类: {list(unique_genres)}")
+            
+            # 为每个 genre 创建独立的 M3U 条目
+            entries_added = 0
+            for genre in unique_genres:
+                # 检查运行限制
+                if len(self.videos) >= self.max_videos:
+                    logger.info(f"  达到条目限制，停止添加")
+                    break
+                
+                # 去重检查: (group_title, url) 同时匹配则跳过
+                if (genre, m3u8_url) in self.existing_entries:
+                    logger.debug(f"    跳过重复条目: {video_code} / {genre}")
+                    continue
+                
+                # 创建条目
+                video_entry = {
+                    'code': str(video_code),
+                    'url': str(m3u8_url),
+                    'genres': genres,
+                    'thumbnail': str(thumbnail),
+                    'group_title': genre
+                }
+                self.videos.append(video_entry)
+                self.new_entries.append(video_entry)
+                self.existing_entries.add((genre, m3u8_url))
+                entries_added += 1
+                
+                logger.info(f"    + 新增条目: {video_code} / {genre}")
+                utils.random_delay(0.3, 0.8)
+            
+            logger.info(f"  本次视频共新增 {entries_added} 个 M3U 条目")
+            return entries_added
+            
+        except Exception as e:
+            logger.error(f"处理视频对象时出错: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
+            return 0
+    
     def fetch_videos(self) -> List[Dict[str, str]]:
         """
         从 missav_api 获取视频 (支持多种模式)
@@ -255,66 +329,14 @@ class MissAVScraper:
                         video_obj = client.get_video(video_url)
                         self.request_count += 1
 
-                        # 提取基本信息
-                        video_code = video_obj.video_code
-                        m3u8_url = video_obj.m3u8_base_url or ""
-
-                        if not m3u8_url:
-                            logger.warning(f"  跳过: 无法获取 m3u8 URL")
-                            self.current_query_index = real_query_idx + 1
-                            continue
-
-                        logger.info(f"  ✓ 视频代码: {video_code}")
-                        logger.info(f"  ✓ m3u8 URL: {m3u8_url[:50]}...")
-
-                        # 提取 genres 和 thumbnail
-                        genres_raw = getattr(video_obj, 'genres', [])
-                        if not isinstance(genres_raw, list):
-                            genres_raw = [genres_raw] if genres_raw else []
-                        thumbnail = getattr(video_obj, 'thumbnail', "") or ""
-
-                        # 规范化 genres（去除空、去重）
-                        genres = utils.normalize_genres(genres_raw)
-                        unique_genres = set(genres)
-
-                        logger.info(f"  ✓ 找到 {len(unique_genres)} 个分类: {list(unique_genres)}")
-
-                        # 为每个 genre 创建独立的 M3U 条目，使用 (group, url) 去重
-                        entries_added = 0
-                        for genre in unique_genres:
-                            # 检查运行限制
-                            if len(self.videos) >= self.max_videos:
-                                logger.info(f"  达到条目限制，停止添加")
-                                break
-
-                            # 去重检查: (group_title, url) 同时匹配则跳过
-                            if (genre, m3u8_url) in self.existing_entries:
-                                logger.debug(f"    跳过重复条目: {video_code} / {genre}")
-                                continue
-
-                            # 创建条目
-                            video_entry = {
-                                'code': str(video_code),
-                                'url': str(m3u8_url),
-                                'genres': genres,  # 保存完整的 genres 列表
-                                'thumbnail': str(thumbnail),
-                                'group_title': genre  # 使用 genre 作为 group_title
-                            }
-                            self.videos.append(video_entry)
-                            self.new_entries.append(video_entry)  # 标记为新增
-                            self.existing_entries.add((genre, m3u8_url))
-                            entries_added += 1
-
-                            logger.info(f"    + 新增条目: {video_code} / {genre}")
-
-                            # 条目间轻微延迟
-                            utils.random_delay(0.3, 0.8)
-
-                        logger.info(f"  本次视频共新增 {entries_added} 个 M3U 条目")
+                        # 使用公共方法处理视频对象
+                        self._process_video_object(video_obj, video_code_input)
                         self.processed_codes.add(video_code_input)
+                        
                     except Exception as e:
                         logger.error(f"  获取视频失败: {e}")
                         import traceback
+                        logger.debug(traceback.format_exc())
                         utils.random_delay(5, 10)
                         self.current_query_index = real_query_idx + 1
                         continue
@@ -356,61 +378,10 @@ class MissAVScraper:
                                 video_obj = client.get_video(video_url)
                                 self.request_count += 1
 
-                                # 提取基本信息
-                                video_code = video_obj.video_code
-                                m3u8_url = video_obj.m3u8_base_url or ""
-
-                                if not m3u8_url:
-                                    logger.warning(f"  跳过: 无法获取 m3u8 URL")
-                                    continue
-
-                                logger.info(f"  ✓ 视频代码: {video_code}")
-                                logger.info(f"  ✓ m3u8 URL: {m3u8_url[:50]}...")
-
-                                # 提取 genres 和 thumbnail
-                                genres_raw = getattr(video_obj, 'genres', [])
-                                if not isinstance(genres_raw, list):
-                                    genres_raw = [genres_raw] if genres_raw else []
-                                thumbnail = getattr(video_obj, 'thumbnail', "") or ""
-
-                                # 规范化 genres
-                                genres = utils.normalize_genres(genres_raw)
-                                unique_genres = set(genres)
-
-                                logger.info(f"  ✓ 找到 {len(unique_genres)} 个分类: {list(unique_genres)}")
-
-                                # 标记已处理
+                                # 使用公共方法处理视频对象
+                                entries = self._process_video_object(video_obj, query)
+                                new_videos_count += entries
                                 self.processed_codes.add(video_code)
-
-                                # 为每个 genre 创建独立的 M3U 条目，使用 (group, url) 去重
-                                for genre in unique_genres:
-                                    # 检查运行限制
-                                    if len(self.videos) >= self.max_videos:
-                                        logger.info(f"  达到条目限制，停止添加")
-                                        break
-
-                                    # 去重检查: (group_title, url)
-                                    if (genre, m3u8_url) in self.existing_entries:
-                                        logger.debug(f"    跳过重复条目: {video_code} / {genre}")
-                                        continue
-
-                                    # 创建条目
-                                    video_entry = {
-                                        'code': str(video_code),
-                                        'url': str(m3u8_url),
-                                        'genres': genres,
-                                        'thumbnail': str(thumbnail),
-                                        'group_title': genre
-                                    }
-                                    self.videos.append(video_entry)
-                                    self.new_entries.append(video_entry)
-                                    self.existing_entries.add((genre, m3u8_url))
-                                    new_videos_count += 1
-
-                                    logger.info(f"    + 新增条目: {video_code} / {genre}")
-
-                                    # 请求间延迟
-                                    utils.random_delay(0.5, 1.5)
 
                             except Exception as e:
                                 logger.debug(f"处理视频时出错: {e}")
