@@ -18,7 +18,7 @@ def sample_video():
     return {
         'code': 'ABC-001',
         'url': 'https://example.com/stream.m3u8',
-        'genres': ['日本', '高清', '新作'],
+        'series': ['日本', '高清', '新作'],
         'thumbnail': 'https://example.com/thumb.jpg',
         'group_title': '日本'
     }
@@ -33,19 +33,19 @@ def multiple_videos():
         {
             'code': 'ABC-001',
             'url': 'https://example.com/stream1.m3u8',
-            'genres': ['日本', '高清'],
+            'series': ['日本', '高清'],
             'thumbnail': 'https://example.com/thumb1.jpg'
         },
         {
             'code': 'DEF-002',
             'url': 'https://example.com/stream2.m3u8',
-            'genres': ['中文', '欧美'],
+            'series': ['中文', '欧美'],
             'thumbnail': 'https://example.com/thumb2.jpg'
         },
         {
             'code': 'GHI-003',
             'url': 'https://example.com/stream3.m3u8',
-            'genres': [],  # 无分类
+            'series': [],  # 无分类
             'thumbnail': 'https://example.com/thumb3.jpg'
         }
     ]
@@ -62,7 +62,7 @@ def temp_state_file():
                 {
                     'code': 'ABC-001',
                     'url': 'https://example.com/stream.m3u8',
-                    'genres': ['日本', '高清'],
+                    'series': ['日本', '高清'],
                     'thumbnail': 'https://example.com/thumb.jpg'
                 }
             ],

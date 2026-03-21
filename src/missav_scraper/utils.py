@@ -97,39 +97,39 @@ def ensure_output_directory(output_file: str) -> Path:
     return output_path
 
 
-def normalize_genres(genres) -> list:
+def normalize_series(series) -> list:
     """
-    规范化 genres 数据
+    规范化 series 数据
     
     Args:
-        genres: 从 API 返回的 genres 数据
+        series: 从 API 返回的 series 数据
         
     Returns:
-        规范化后的 genres 列表
+        规范化后的 series 列表
     """
-    if not genres:
+    if not series:
         return [constants.DEFAULT_GENRE]
     
-    if isinstance(genres, str):
-        return [genres] if genres.strip() else [constants.DEFAULT_GENRE]
+    if isinstance(series, str):
+        return [series] if series.strip() else [constants.DEFAULT_GENRE]
     
-    if isinstance(genres, list):
-        normalized = [str(g).strip() for g in genres if g]
+    if isinstance(series, list):
+        normalized = [str(s).strip() for s in series if s]
         return normalized if normalized else [constants.DEFAULT_GENRE]
     
     return [constants.DEFAULT_GENRE]
 
 
-def format_video_info(video_code: str, genres: list) -> str:
+def format_video_info(video_code: str, series: list) -> str:
     """
-    格式化视频信息用于日志显示
+    格式化视频信息用于日志输出
     
     Args:
         video_code: 视频代码
-        genres: 分类列表
+        series: 系列列表
         
     Returns:
-        格式化的字符串
+        格式化后的字符串
     """
-    genres_str = ', '.join(genres) if genres else 'N/A'
-    return f"{video_code} | 分类: {genres_str}"
+    series_str = ', '.join(series) if series else 'N/A'
+    return f"{video_code} | 系列: {series_str}"

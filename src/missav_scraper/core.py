@@ -83,8 +83,9 @@ class MissAVScraper:
             logger.warning(f"未知的爬虫模式: {self.scraper_mode}, 回退到 video-codes 模式")
             self.search_queries = constants.VIDEO_CODE_LIST
 
-        self.current_query_index = 0
+        self.current_query_index = -1
         self.query_group_mapping = {}  # 映射: 查询 -> 数量统计 (仅 batch-actresses 使用)
+        self.m3u_file_initialized = False  # 标记 M3U 文件头是否已写入
 
         # 加载已存在的 URL（用于统计）
         self.existing_urls: Set[str] = utils.load_existing_urls(self.output_file)
@@ -96,7 +97,8 @@ class MissAVScraper:
             self.processed_codes = set(v['code'] for v in self.videos)
 
         # 从状态恢复当前查询索引
-        self.current_query_index = self.state.get('current_query_index', 0)
+        # 默认值应该是 -1（表示还没处理任何查询），不是 0
+        self.current_query_index = self.state.get('current_query_index', -1)
         self.query_group_mapping = self.state.get('query_group_mapping', {})
 
         # 构建 existing_entries 集合用于去重 (包含已保存的条目)
@@ -110,21 +112,29 @@ class MissAVScraper:
         """打印爬虫启动信息"""
         logger.info("=" * 70)
         logger.info("爬虫启动参数:")
+        next_idx = self.current_query_index + 1
+        is_resume = self.current_query_index >= 0
 
         if self.scraper_mode == "batch-actresses":
             logger.info(f"  模式: 批量获取演员视频 (使用 search)")
             logger.info(f"  总演员数: {len(self.search_queries)}")
-            logger.info(f"  当前进度: {self.current_query_index + 1}/{len(self.search_queries)}")
-            logger.info(f"  当前演员: {self.search_queries[self.current_query_index]}")
+            if is_resume:
+                logger.info(f"  恢复进度: {next_idx}/{len(self.search_queries)}")
+                logger.info(f"  下一个演员: {self.search_queries[next_idx] if next_idx < len(self.search_queries) else '（已完成）'}")
+            else:
+                logger.info(f"  准备开始: 从第 1/{len(self.search_queries)} 开始")
+                logger.info(f"  第一个演员: {self.search_queries[0]}")
         elif self.scraper_mode == "single-query":
             logger.info(f"  模式: 单查询模式 (使用 search)")
             logger.info(f"  查询列表: {len(self.search_queries)} 个查询")
         elif self.scraper_mode == "video-codes":
             logger.info(f"  模式: 视频代码模式 (使用 get_video)")
             logger.info(f"  总视频代码数: {len(self.search_queries)}")
-            logger.info(f"  当前进度: {self.current_query_index + 1}/{len(self.search_queries)}")
-            if self.current_query_index < len(self.search_queries):
-                logger.info(f"  当前代码: {self.search_queries[self.current_query_index]}")
+            if is_resume:
+                logger.info(f"  恢复进度: {next_idx}/{len(self.search_queries)}")
+                logger.info(f"  下一个代码: {self.search_queries[next_idx] if next_idx < len(self.search_queries) else '（已完成）'}")
+            else:
+                logger.info(f"  准备开始: 从第 1/{len(self.search_queries)} 开始")
         else:
             logger.info(f"  模式: 未知 ({self.scraper_mode})")
 
@@ -154,18 +164,25 @@ class MissAVScraper:
         return {'videos': []}
     
     def _save_state(self) -> None:
-        """保存爬虫状态（用于断点续爬）"""
+        """
+        保存爬虫状态（用于断点续爬）
+        
+        current_query_index: 已处理的最后一个索引
+        current_query: 下一个要处理的查询（用于显示）
+        """
         if not self.enable_checkpoint:
             return
         
         try:
+            next_query_idx = self.current_query_index + 1
             state = {
                 'videos': self.videos,
                 'existing_urls_count': len(self.existing_urls),
                 'last_update': datetime.now().isoformat(),
                 'total_videos_processed': len(self.processed_codes),
                 'current_query_index': self.current_query_index,
-                'current_query': self.search_queries[self.current_query_index] if self.current_query_index < len(self.search_queries) else None,
+                'next_query_index': next_query_idx,
+                'next_query': self.search_queries[next_query_idx] if next_query_idx < len(self.search_queries) else None,
                 'query_group_mapping': self.query_group_mapping,
                 'scraper_mode': self.scraper_mode,
                 'total_queries': len(self.search_queries)
@@ -173,9 +190,58 @@ class MissAVScraper:
             
             with open(constants.STATE_FILE, 'w', encoding='utf-8') as f:
                 json.dump(state, f, ensure_ascii=False, indent=2)
-            logger.debug(f"进度已保存 (查询 {self.current_query_index + 1}/{len(self.search_queries)}, {len(self.videos)} 个视频)")
+            logger.debug(f"进度已保存 (查询 {self.current_query_index + 1}/{len(self.search_queries)}, {len(self.videos)} 个视频, 下一个: {self.current_query_index + 2})")
         except Exception as e:
             logger.error(f"保存状态失败: {e}")
+    
+    def _append_to_m3u(self, video_entry: Dict[str, str]) -> None:
+        """
+        实时追加单个视频条目到 M3U 文件（每获取到一个视频就立即保存）
+        
+        Args:
+            video_entry: 视频条目字典，包含 code, url, series, thumbnail, group_title
+        """
+        try:
+            output_path = utils.ensure_output_directory(self.output_file)
+            
+            # 首次写入时创建文件头
+            if not self.m3u_file_initialized:
+                # 检查文件是否存在且非空
+                file_exists = output_path.exists() and output_path.stat().st_size > 0
+                
+                if not file_exists:
+                    # 创建新文件，写入头部
+                    with open(output_path, 'w', encoding='utf-8') as f:
+                        f.write(f'{constants.M3U_HEADER}\n')
+                    logger.debug("✓ 创建新的 M3U 文件并写入头部")
+                
+                self.m3u_file_initialized = True
+            
+            # 追加条目
+            code = video_entry.get('code', 'Unknown')
+            url = video_entry.get('url', '')
+            thumbnail = video_entry.get('thumbnail', '')
+            group_title = video_entry.get('group_title', constants.M3U_GROUP_TITLE)
+            
+            if not url:
+                logger.warning(f"  跳过无效的 URL: {code}")
+                return
+            
+            # 写入条目到文件
+            with open(output_path, 'a', encoding='utf-8') as f:
+                extinf = constants.M3U_EXTINF_FORMAT.format(
+                    group=group_title,
+                    code=code,
+                    logo=thumbnail
+                )
+                f.write(f'{extinf}\n')
+                f.write(f'{url}\n')
+            
+            self.existing_urls.add(url)
+            logger.debug(f"  ✓ 已保存到 M3U 文件: {code} / {group_title}")
+            
+        except Exception as e:
+            logger.error(f"追加到 M3U 文件时出错: {e}")
     
     def _process_video_object(self, video_obj, source_query: str) -> int:
         """
@@ -184,7 +250,7 @@ class MissAVScraper:
         此方法提取了video-codes和搜索模式中重复的视频处理逻辑
         
         Args:
-            video_obj: 视频对象（包含video_code、m3u8_base_url、genres等字段）
+            video_obj: 视频对象（包含video_code、m3u8_base_url、series等字段）
             source_query: 视频来源（查询词或演员名）
         
         Returns:
@@ -202,44 +268,47 @@ class MissAVScraper:
             logger.info(f"  ✓ 视频代码: {video_code}")
             logger.info(f"  ✓ m3u8 URL: {m3u8_url[:50]}...")
             
-            # 提取 genres 和 thumbnail
-            genres_raw = getattr(video_obj, 'genres', [])
-            if not isinstance(genres_raw, list):
-                genres_raw = [genres_raw] if genres_raw else []
+            # 提取 series 和 thumbnail
+            series_raw = getattr(video_obj, 'series', [])
+            if not isinstance(series_raw, list):
+                series_raw = [series_raw] if series_raw else []
             thumbnail = getattr(video_obj, 'thumbnail', "") or ""
             
-            # 规范化 genres（去除空、去重）
-            genres = utils.normalize_genres(genres_raw)
-            unique_genres = set(genres)
-            logger.info(f"  ✓ 找到 {len(unique_genres)} 个分类: {list(unique_genres)}")
+            # 规范化 series（去除空、去重）
+            series = utils.normalize_series(series_raw)
+            unique_series = set(series)
+            logger.info(f"  ✓ 找到 {len(unique_series)} 个系列: {list(unique_series)}")
             
-            # 为每个 genre 创建独立的 M3U 条目
+            # 为每个 series 创建独立的 M3U 条目
             entries_added = 0
-            for genre in unique_genres:
+            for s in unique_series:
                 # 检查运行限制
                 if len(self.videos) >= self.max_videos:
                     logger.info(f"  达到条目限制，停止添加")
                     break
                 
                 # 去重检查: (group_title, url) 同时匹配则跳过
-                if (genre, m3u8_url) in self.existing_entries:
-                    logger.debug(f"    跳过重复条目: {video_code} / {genre}")
+                if (s, m3u8_url) in self.existing_entries:
+                    logger.debug(f"    跳过重复条目: {video_code} / {s}")
                     continue
                 
                 # 创建条目
                 video_entry = {
                     'code': str(video_code),
                     'url': str(m3u8_url),
-                    'genres': genres,
+                    'series': series,
                     'thumbnail': str(thumbnail),
-                    'group_title': genre
+                    'group_title': s
                 }
                 self.videos.append(video_entry)
                 self.new_entries.append(video_entry)
-                self.existing_entries.add((genre, m3u8_url))
+                self.existing_entries.add((s, m3u8_url))
                 entries_added += 1
                 
-                logger.info(f"    + 新增条目: {video_code} / {genre}")
+                # 实时保存到 M3U 文件（每获取到一个就立即保存）
+                self._append_to_m3u(video_entry)
+                
+                logger.info(f"    + 新增条目: {video_code} / {s}")
                 utils.random_delay(0.3, 0.8)
             
             logger.info(f"  本次视频共新增 {entries_added} 个 M3U 条目")
@@ -258,7 +327,7 @@ class MissAVScraper:
         Modes:
           - "batch-actresses": 使用 search() 搜索演员名
           - "single-query": 使用 search() 搜索单个或多个查询词
-          - "video-codes": 使用 get_video() 直接获取番号对应的视频，并按 genres 展开多个条目
+          - "video-codes": 使用 get_video() 直接获取番号对应的视频，并按 series 展开多个条目
 
         Returns:
             获取到的视频列表（已展开为多个条目）
@@ -278,22 +347,21 @@ class MissAVScraper:
         client = Client()
         # Suppress debug logs from third-party libraries after client creation
         for _logger_name in ['BASE API', 'BaseCore', 'missav_api', 'httpx', 'httpcore']:
-            logging.getLogger(_logger_name).setLevel(logging.WARNING)
+            logging.getLogger(_logger_name).setLevel(logging.INFO)
 
         logger.info(f"开始获取视频列表...")
 
         try:
             # 确定剩余要处理的查询/代码
-            if self.scraper_mode in ("batch-actresses", "single-query"):
-                remaining_queries = self.search_queries[self.current_query_index:]
-            else:  # video-codes
-                remaining_queries = self.search_queries[self.current_query_index:]
+            # current_query_index 表示已处理的最后一个索引，所以从 current_query_index + 1 开始
+            start_idx = self.current_query_index + 1
+            remaining_queries = self.search_queries[start_idx:]
 
             total_queries = len(self.search_queries)
-            logger.info(f"模式: {self.scraper_mode}, 剩余 {len(remaining_queries)}/{total_queries} 项")
+            logger.info(f"模式: {self.scraper_mode}, 已处理 {start_idx}/{total_queries}, 剩余 {len(remaining_queries)} 项")
 
             for query_offset, query in enumerate(remaining_queries):
-                real_query_idx = self.current_query_index + query_offset
+                real_query_idx = start_idx + query_offset
 
                 # 检查索引范围
                 if real_query_idx >= total_queries:
@@ -317,7 +385,7 @@ class MissAVScraper:
                     # 如果该代码已经在 processed_codes 中，说明已获取过，跳过
                     if video_code_input in self.processed_codes:
                         logger.info(f"  跳过已处理的番号: {video_code_input}")
-                        self.current_query_index = real_query_idx + 1
+                        self.current_query_index = real_query_idx
                         continue
 
                     # 构建视频页面 URL
@@ -338,13 +406,15 @@ class MissAVScraper:
                         import traceback
                         logger.debug(traceback.format_exc())
                         utils.random_delay(5, 10)
-                        self.current_query_index = real_query_idx + 1
+                        # 失败时也要更新索引，标记已处理过此项
+                        self.current_query_index = real_query_idx
                         continue
 
                 # ==================== 搜索模式 (batch-actresses / single-query) ====================
                 else:
                     try:
                         # 获取本次查询的视频列表
+                        # search() 返回的已是完整视频对象，可直接使用（无需再调用 get_video）
                         search_results = client.search(
                             query=query,
                             video_count=constants.VIDEOS_PER_QUERY
@@ -354,7 +424,7 @@ class MissAVScraper:
                         new_videos_count = 0
                         # 记录搜索请求
                         self.request_count += 1
-                        for video_summary in search_results:
+                        for video_obj in search_results:
                             # 检查是否已达到本次运行限制
                             if len(self.videos) >= self.max_videos:
                                 logger.info(f"  已达到本次运行限制，停止处理此查询")
@@ -363,8 +433,7 @@ class MissAVScraper:
                             result_count += 1
 
                             try:
-                                video_code = video_summary.video_code
-                                video_url = f"https://missav.ws/cn/{video_code}"
+                                video_code = video_obj.video_code
 
                                 if result_count == 1:
                                     logger.info(f"  ✓ 首个视频: {video_code}")
@@ -373,15 +442,11 @@ class MissAVScraper:
                                 if video_code in self.processed_codes:
                                     continue
 
-                                # 使用 get_video 获取完整视频信息
-                                logger.debug(f"    获取视频详情: {video_url}")
-                                video_obj = client.get_video(video_url)
-                                self.request_count += 1
-
-                                # 使用公共方法处理视频对象
+                                # 使用公共方法处理视频对象（search 已返回完整对象，无需再调用 get_video）
                                 entries = self._process_video_object(video_obj, query)
                                 new_videos_count += entries
                                 self.processed_codes.add(video_code)
+                                self._save_state()
 
                             except Exception as e:
                                 logger.debug(f"处理视频时出错: {e}")
@@ -392,12 +457,12 @@ class MissAVScraper:
                     except Exception as e:
                         logger.warning(f"查询 '{query}' 失败: {e}")
                         utils.random_delay(5, 10)
-                        # 移动索引并继续
-                        self.current_query_index = real_query_idx + 1
+                        # 失败时也要更新索引，标记已处理过此项
+                        self.current_query_index = real_query_idx
                         continue
 
-                # 更新进度（成功完成此项）
-                self.current_query_index = real_query_idx + 1
+                # 更新进度（成功完成此项，标记为已处理）
+                self.current_query_index = real_query_idx
 
                 # 定期保存状态 (每处理 5 项或在 video-codes 模式下每项)
                 self._save_state()
@@ -413,7 +478,7 @@ class MissAVScraper:
             logger.info(f"\n{'='*70}")
             logger.info(f"爬虫完成! 共获取 {len(self.videos)} 个 M3U 条目")
             logger.info(f"总请求数: {self.request_count}")
-            logger.info(f"已处理项目: {self.current_query_index}/{total_queries}")
+            logger.info(f"已处理项目: {self.current_query_index + 1}/{total_queries}")
             logger.info(f"{'='*70}")
 
         except KeyboardInterrupt:
@@ -430,85 +495,23 @@ class MissAVScraper:
     
     def save_to_m3u(self) -> bool:
         """
-        将数据保存为 M3U 格式
+        完成 M3U 文件保存（条目已在实时保存中完成）
 
-        特点：
-        - 增量更新：以追加模式保存
-        - 不去重：所有视频都会保存（包括重复 URL）
-        - 多 genre 支持：为每个 genre 创建独立条目
-        - 按演员/搜索参数分组：不同查询使用不同的 group_title
-
+        返回保存统计信息
+        
         Returns:
-            保存成功返回 True，失败返回 False
+            如果有新条目被保存返回 True，否则返回 False
         """
-        logger.info(f"开始保存为 M3U 格式: {self.output_file}")
-        
-        # 如果没有新增条目，则跳过写入
+        # 如果没有新增条目，则跳过处理
         if not self.new_entries:
-            logger.info("没有新增条目需要写入 M3U")
+            logger.info("没有新增条目需要处理")
             return False
         
-        try:
-            # 确保输出目录存在
-            output_path = utils.ensure_output_directory(self.output_file)
-            
-            total_new_entries = 0
-            skipped_duplicates = 0
-            skipped_invalid = 0
-            
-            # 检查文件是否已存在
-            file_exists = output_path.exists() and output_path.stat().st_size > 0
-            
-            # 以追加模式打开文件
-            with open(output_path, 'a', encoding='utf-8') as f:
-                # 如果文件不存在或为空，写入 M3U 头
-                if not file_exists:
-                    f.write(f'{constants.M3U_HEADER}\n')
-                    logger.info("✓ 创建新的 M3U 文件")
-                else:
-                    logger.info("✓ 追加到现有的 M3U 文件")
-                
-                # 处理本次新增的每个视频条目
-                for video in self.new_entries:
-                    code = video.get('code', 'Unknown')
-                    url = video.get('url', '')
-                    genres = video.get('genres', [])
-                    thumbnail = video.get('thumbnail', '')
-                    
-                    # 使用video中的group_title，如果没有则使用默认值
-                    group_title = video.get('group_title', constants.M3U_GROUP_TITLE)
-                    
-                    # 检查 URL 有效性
-                    if not url:
-                        logger.warning(f"跳过无效的 URL: {code}")
-                        skipped_invalid += 1
-                        continue
-                    
-                    
-                    # 使用video指定的group_title（按演员分类）或默认值
-                    extinf = constants.M3U_EXTINF_FORMAT.format(
-                        group=group_title,
-                        code=code,
-                        logo=thumbnail
-                    )
-                    f.write(f'{extinf}\n')
-                    f.write(f'{url}\n')
-                    
-                    total_new_entries += 1
-                    self.existing_urls.add(url)
-            
-            # 输出保存统计信息
-            logger.info(f"✓ 本次新增 {total_new_entries} 个条目")
-            if skipped_duplicates > 0:
-                logger.info(f"  跳过重复 {skipped_duplicates} 个")
-            if skipped_invalid > 0:
-                logger.info(f"  跳过无效 {skipped_invalid} 个")
-            logger.info(f"  文件: {self.output_file}")
-            return True
-        
-        except Exception as e:
-            logger.error(f"保存 M3U 文件时出错: {e}")
-            return False
+        # 输出保存统计信息（条目已在 _append_to_m3u 中实时保存）
+        logger.info(f"✓ M3U 文件已完成保存: {self.output_file}")
+        logger.info(f"✓ 本次新增 {len(self.new_entries)} 个条目")
+        logger.info(f"  文件: {self.output_file}")
+        return True
     
     def run(self) -> None:
         """

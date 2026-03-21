@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-验证脚本 - 测试新增的 genres 和 thumbnail 功能
+验证脚本 - 测试新增的 series 和 thumbnail 功能
 """
 
 import json
@@ -17,16 +17,16 @@ def test_video_structure(sample_video):
     
     print(f"✓ 视频番号: {sample_video['code']}")
     print(f"✓ M3U8 URL: {sample_video['url']}")
-    print(f"✓ 分类列表: {sample_video['genres']}")
+    print(f"✓ 系列列表: {sample_video['series']}")
     print(f"✓ 缩略图: {sample_video['thumbnail']}")
     
     # 确保视频对象包含所需字段
     assert 'code' in sample_video
     assert 'url' in sample_video
-    assert 'genres' in sample_video
+    assert 'series' in sample_video
     assert 'thumbnail' in sample_video
-    assert isinstance(sample_video['genres'], list)
-    assert len(sample_video['genres']) > 0
+    assert isinstance(sample_video['series'], list)
+    assert len(sample_video['series']) > 0
 
 
 def test_m3u_generation(sample_video):
@@ -40,29 +40,29 @@ def test_m3u_generation(sample_video):
     
     code = sample_video.get('code', 'Unknown')
     url = sample_video.get('url', '')
-    genres = sample_video.get('genres', [])
+    series = sample_video.get('series', [])
     thumbnail = sample_video.get('thumbnail', '')
     
-    if not genres or len(genres) == 0:
-        genres = ['未分类']
+    if not series or len(series) == 0:
+        series = ['未分类']
     
-    for genre in genres:
-        genre_str = str(genre).strip() if genre else '未分类'
-        line1 = f'#EXTINF:-1 group-title="{genre_str}" tvg-name="{code}" tvg-logo="{thumbnail}" epg-url="",{code}'
+    for s in series:
+        series_str = str(s).strip() if s else '未分类'
+        line1 = f'#EXTINF:-1 group-title="{series_str}" tvg-name="{code}" tvg-logo="{thumbnail}" epg-url="",{code}'
         line2 = url
         
         test_output.append(line1)
         test_output.append(line2)
-        print(f"\n分类: {genre_str}")
+        print(f"\n系列: {series_str}")
         print(f"  {line1}")
         print(f"  {line2}")
     
-    print(f"\n✓ 生成了 {len(genres)} 条 M3U 条目")
+    print(f"\n✓ 生成了 {len(series)} 条 M3U 条目")
     
     # 验证生成的条目
     assert len(test_output) >= 3  # 至少有#EXTM3U + 1个条目（2行）
     assert test_output[0] == '#EXTM3U'
-    assert len(genres) > 0
+    assert len(series) > 0
 
 
 def test_multiple_videos(multiple_videos):
@@ -73,15 +73,15 @@ def test_multiple_videos(multiple_videos):
     
     total_entries = 0
     for video in multiple_videos:
-        genres = video.get('genres', [])
-        if not genres or len(genres) == 0:
-            genres = ['未分类']
-        entry_count = len(genres)
+        series = video.get('series', [])
+        if not series or len(series) == 0:
+            series = ['未分类']
+        entry_count = len(series)
         total_entries += entry_count
         
         code = video['code']
-        genre_str = ', '.join(genres)
-        print(f"✓ {code}: {genre_str} ({entry_count} 条条目)")
+        series_str = ', '.join(series)
+        print(f"✓ {code}: {series_str} ({entry_count} 条条目)")
     
     print(f"\n总结: {len(multiple_videos)} 个视频 → {total_entries} 个 M3U 条目")
     
@@ -113,7 +113,7 @@ def test_state_file(temp_state_file):
         video = state['videos'][0]
         assert 'code' in video
         assert 'url' in video
-        assert 'genres' in video
+        assert 'series' in video
         assert 'thumbnail' in video
     
     print("格式示例:")
