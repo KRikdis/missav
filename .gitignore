@@ -1,0 +1,56 @@
+# Python 缓存文件
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# C 扩展
+*.c
+*.egg-info/
+
+# Pip
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# 虚拟环境
+venv/
+ENV/
+env/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# 爬虫生成的文件
+*.m3u
+missed_videos.json
+logs/
+
+# 配置文件（但保留示例）
+config.json
+!config.example.json
+
+# 其他
+.env
+*.log
