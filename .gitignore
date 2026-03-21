@@ -29,7 +29,6 @@ htmlcov/
 .tox/
 
 # 输出文件（生成的 M3U）
-output/*.m3u
 !output/.gitkeep
 
 # 状态文件
