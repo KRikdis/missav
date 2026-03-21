@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 def setup_logging(verbose: bool = False) -> None:
     """
     配置日志系统
-    
+
     Args:
         verbose: 是否启用详细日志输出 (DEBUG 级别)
     """
@@ -31,6 +31,11 @@ def setup_logging(verbose: bool = False) -> None:
         format=constants.LOG_FORMAT
     )
     logging.getLogger(__name__).setLevel(level)
+
+    # 关闭 missav_api 等第三方库的 DEBUG 日志
+    # 这些库的 logger 名称通常在初始化时指定
+    for logger_name in ['BASE API', 'BaseCore', 'missav_api', 'httpx', 'httpcore']:
+        logging.getLogger(logger_name).setLevel(logging.WARNING)
 
 
 def random_delay(min_seconds: float = None, max_seconds: float = None) -> None:

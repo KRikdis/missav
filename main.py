@@ -6,21 +6,21 @@ MissAV M3U 爬虫 - 主入口脚本
 使用新的模块化结构，支持所有高级功能：
 - 多模式支持：单查询模式 或 批量演员轮转模式
 - 增量更新：追加模式保存 M3U 文件
-- 去重：自动检查和跳过重复 URL
 - 断点续爬：保存爬虫状态，支持中断后继续（支持多参数续接）
 - 限制收集：每次运行最多收集指定数量的视频，保护 IP
 - 限流保护：自动添加延迟，避免 IP 被限制
 - 分类保存：不同搜索词的视频按不同 group_title 保存
+- 不去重：所有视频都会保存，允许重复 URL
 
 说明：
-  当前爬虫模式: {SCRAPER_MODE}
-  
+  当前爬虫模式: batch-actresses
+
   如果 SCRAPER_MODE = "batch-actresses":
     - 会自动轮转处理所有演员
     - 每次执行处理一个演员的全部视频
     - 支持断点续爬：中断后下次自动继续下一个演员
     - 每个演员的视频按名字分类 (group_title)
-  
+
   如果 SCRAPER_MODE = "single-query":
     - 使用单个查询字符串模式
     - 每次运行处理该查询
@@ -40,7 +40,7 @@ MissAV M3U 爬虫 - 主入口脚本
 
     清除所有进度：
         python main.py --clean
-""".format(SCRAPER_MODE=constants.SCRAPER_MODE)
+"""
 
 
 import sys
