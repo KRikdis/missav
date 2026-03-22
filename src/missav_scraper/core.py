@@ -92,18 +92,14 @@ class MissAVScraper:
 
         # 加载保存的状态
         self.state = self._load_state() if enable_checkpoint else {}
-        if self.state.get('videos'):
-            self.videos = self.state['videos']
-            self.processed_codes = set(v['code'] for v in self.videos)
-
+        
         # 从状态恢复当前查询索引
         # 默认值应该是 -1（表示还没处理任何查询），不是 0
         self.current_query_index = self.state.get('current_query_index', -1)
         self.query_group_mapping = self.state.get('query_group_mapping', {})
 
-        # 构建 existing_entries 集合用于去重 (包含已保存的条目)
-        for v in self.videos:
-            self.existing_entries.add((v['group_title'], v['url']))
+        # 构建 existing_entries 集合用于去重 (从 M3U 文件中读取已保存的条目)
+        self._load_existing_entries_from_m3u()
         
         # 输出启动信息
         self._print_startup_info()
@@ -148,6 +144,8 @@ class MissAVScraper:
         """
         加载保存的爬虫状态（用于断点续爬）
         
+        只加载进度信息，不加载视频数据
+        
         Returns:
             包含保存状态的字典
         """
@@ -156,19 +154,59 @@ class MissAVScraper:
             if state_path.exists():
                 with open(state_path, 'r', encoding='utf-8') as f:
                     state = json.load(f)
-                logger.info(f"已加载保存的状态 (已有 {len(state.get('videos', []))} 个视频)")
+                logger.info(f"已加载保存的状态")
                 return state
         except Exception as e:
             logger.warning(f"加载状态文件失败: {e}")
         
-        return {'videos': []}
+        return {}
+    
+    def _load_existing_entries_from_m3u(self) -> None:
+        """
+        从 M3U 文件中读取已存在的条目用于去重
+        
+        M3U 格式: 每个条目占两行
+        - 第一行: #EXTINF:... group-title="..." tvg-name="..." ...
+        - 第二行: URL
+        """
+        try:
+            m3u_path = Path(self.output_file)
+            if m3u_path.exists():
+                with open(m3u_path, 'r', encoding='utf-8') as f:
+                    lines = f.readlines()
+                
+                i = 0
+                while i < len(lines):
+                    line = lines[i].strip()
+                    
+                    # 查找 EXTINF 行
+                    if line.startswith('#EXTINF:'):
+                        # 提取 group-title
+                        group_title = ""
+                        if 'group-title="' in line:
+                            start = line.find('group-title="') + len('group-title="')
+                            end = line.find('"', start)
+                            group_title = line[start:end]
+                        
+                        # 下一行应该是 URL
+                        if i + 1 < len(lines):
+                            url = lines[i + 1].strip()
+                            if url and not url.startswith('#'):
+                                self.existing_entries.add((group_title, url))
+                                logger.debug(f"加载已存在的条目: {group_title} / {url[:50]}...")
+                        i += 2
+                    else:
+                        i += 1
+                
+                logger.info(f"从 M3U 文件加载了 {len(self.existing_entries)} 个已存在的条目用于去重")
+        except Exception as e:
+            logger.warning(f"加载 M3U 文件中的条目失败: {e}")
     
     def _save_state(self) -> None:
         """
         保存爬虫状态（用于断点续爬）
         
-        current_query_index: 已处理的最后一个索引
-        current_query: 下一个要处理的查询（用于显示）
+        只保存进度信息，不保存具体视频数据（视频数据已实时写入 M3U 文件）
         """
         if not self.enable_checkpoint:
             return
@@ -176,21 +214,17 @@ class MissAVScraper:
         try:
             next_query_idx = self.current_query_index + 1
             state = {
-                'videos': self.videos,
-                'existing_urls_count': len(self.existing_urls),
                 'last_update': datetime.now().isoformat(),
-                'total_videos_processed': len(self.processed_codes),
                 'current_query_index': self.current_query_index,
                 'next_query_index': next_query_idx,
                 'next_query': self.search_queries[next_query_idx] if next_query_idx < len(self.search_queries) else None,
-                'query_group_mapping': self.query_group_mapping,
                 'scraper_mode': self.scraper_mode,
                 'total_queries': len(self.search_queries)
             }
             
             with open(constants.STATE_FILE, 'w', encoding='utf-8') as f:
                 json.dump(state, f, ensure_ascii=False, indent=2)
-            logger.debug(f"进度已保存 (查询 {self.current_query_index + 1}/{len(self.search_queries)}, {len(self.videos)} 个视频, 下一个: {self.current_query_index + 2})")
+            logger.debug(f"进度已保存 (查询 {self.current_query_index + 1}/{len(self.search_queries)})")
         except Exception as e:
             logger.error(f"保存状态失败: {e}")
     
@@ -417,7 +451,8 @@ class MissAVScraper:
                         # search() 返回的已是完整视频对象，可直接使用（无需再调用 get_video）
                         search_results = client.search(
                             query=query,
-                            video_count=constants.VIDEOS_PER_QUERY
+                            video_count=constants.VIDEOS_PER_QUERY,
+                            max_workers=20
                         )
 
                         result_count = 0
@@ -446,7 +481,6 @@ class MissAVScraper:
                                 entries = self._process_video_object(video_obj, query)
                                 new_videos_count += entries
                                 self.processed_codes.add(video_code)
-                                self._save_state()
 
                             except Exception as e:
                                 logger.debug(f"处理视频时出错: {e}")
@@ -463,7 +497,6 @@ class MissAVScraper:
 
                 # 更新进度（成功完成此项，标记为已处理）
                 self.current_query_index = real_query_idx
-
                 # 定期保存状态 (每处理 5 项或在 video-codes 模式下每项)
                 self._save_state()
 

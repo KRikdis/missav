@@ -10,7 +10,7 @@
 # 文件和状态管理
 # ============================================================================
 
-STATE_FILE = "scraper_state.json"
+STATE_FILE = "output/scraper_state.json"
 OUTPUT_DIR = "output"
 OUTPUT_FILE = "missav.m3u"
 CONFIG_DIR = "config"
